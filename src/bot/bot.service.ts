@@ -80,6 +80,7 @@ export class BotService {
 
   @Command('add')
   async onAddLecture(@Ctx() ctx: Context) {
+    console.log({ username: ctx.from?.username });
     const userId = ctx.from?.id!;
     this.state.set(userId, { step: 'date' });
     await ctx.reply('Введите дату лекции в формате ГГГГ-ММ-ДД');
