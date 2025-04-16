@@ -14,7 +14,7 @@ export class ScraperService {
     private readonly parserService: ParserService,
   ) {}
   async attendLecture(job: Job, done: () => void): Promise<void> {
-    const browser = await puppeteer.launch({ headless: false, slowMo: 10 });
+    const browser = await puppeteer.launch({ headless: true, slowMo: 10 });
     const page = await browser.newPage();
 
     await page.goto(job.attrs.data.link);
