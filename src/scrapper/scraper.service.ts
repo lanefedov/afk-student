@@ -14,7 +14,11 @@ export class ScraperService {
     private readonly parserService: ParserService,
   ) {}
   async attendLecture(job: Job, done: () => void): Promise<void> {
-    const browser = await puppeteer.launch({ headless: true, slowMo: 10 });
+    const browser = await puppeteer.launch({
+      headless: true,
+      slowMo: 10,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
     const page = await browser.newPage();
 
     await page.goto(job.attrs.data.link);
@@ -100,7 +104,7 @@ export class ScraperService {
   async getRoomName(url: string): Promise<string | null> {
     let browser: Browser | undefined;
 
-    browser = await puppeteer.launch({ headless: true });
+    browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page: Page = await browser.newPage();
 
     await page.goto(url, { waitUntil: 'networkidle2' });
