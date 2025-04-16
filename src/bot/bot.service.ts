@@ -231,6 +231,7 @@ export class BotService {
         try {
           currentState.roomName = await this.scraperService.getRoomName(currentState.link);
         } catch (err) {
+          console.error(err);
           await ctx.reply(
             'Некорректная ссылка, проверьте на опечатки, ссылка должна быть такого вида https://bbb.ssau.ru/b/erw-iht-weq',
           );
