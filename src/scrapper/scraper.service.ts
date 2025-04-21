@@ -13,53 +13,67 @@ export class ScraperService {
     private readonly analyzerService: AnalyzerService,
     private readonly parserService: ParserService,
   ) {}
-  async attendLecture(job: Job, done: () => void): Promise<void> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      slowMo: 10,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    const page = await browser.newPage();
+  async attendLecture(
+    job: Job,
+    onConnect: (job: Job) => Promise<void>,
+    setSaidHiFlag: (job: Job) => Promise<void>,
+  ): Promise<string> {
+    return new Promise(async (resolve, reject) => {
+      const browser = await puppeteer.launch({
+        headless: true,
+        slowMo: 10,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      });
+      const page = await browser.newPage();
+      try {
+        await page.goto(job.attrs.data.link);
+        await page.locator('input[id*="join"]').fill(job.attrs.data.name);
+        await page.locator('button[type="submit"]').click();
 
-    await page.goto(job.attrs.data.link);
-    await page.locator('input[id*="join"]').fill(job.attrs.data.name);
-    await page.locator('button[type="submit"]').click();
-    const element = await page.waitForSelector(
-      'button[aria-label="Listen only"], button[aria-label="Только слушать"]',
-      { timeout: 0 },
-    );
-    element?.click();
-
-    if (Date.now() - job.attrs.data.start.getTime() < 600000) {
-      //если опоздали на 10 минут, то Здравствуйте уже не говорим
-      await this.sayHi(page);
-    }
-    const interval = setInterval(async () => {
-      const [messages, count] = await Promise.all([this.getMessages(page), this.getUsersCount(page)]);
-
-      if (count > this.maxUsersCount) {
-        this.maxUsersCount = count;
-      } else {
-        if (this.maxUsersCount - count > 25) {
-          clearInterval(interval);
-          done();
-          await page.close();
+        const element = await page.waitForSelector(
+          'button[aria-label="Listen only"], button[aria-label="Только слушать"]',
+          {
+            timeout: 10000,
+          },
+        );
+        await element?.click();
+        await onConnect(job);
+        if (Date.now() - job.attrs.data.start.getTime() < 600000 && !job.attrs.data.alreadySaidHi) {
+          //если опоздали на 10 минут, то Здравствуйте уже не говорим
+          await Promise.all([this.sayHi(page), setSaidHiFlag(job)]);
         }
-      }
 
-      if (this.analyzerService.isLastTwoMessagesGoodbye(messages)) {
-        clearInterval(interval);
-        await this.sayGoodbye(page);
-        done();
-        await page.close();
-      }
+        const interval = setInterval(async () => {
+          const [messages, count] = await Promise.all([this.getMessages(page), this.getUsersCount(page)]);
 
-      if (job.attrs.data.end.getTime() <= Date.now()) {
-        clearInterval(interval);
-        done();
+          if (this.analyzerService.isLastTwoMessagesGoodbye(messages)) {
+            clearInterval(interval);
+            await this.sayGoodbye(page);
+            await page.close();
+            resolve('Пару человек написали в чате "До свидания".');
+          }
+
+          if (count > this.maxUsersCount) {
+            this.maxUsersCount = count;
+          } else {
+            if (this.maxUsersCount - count > 25) {
+              clearInterval(interval);
+              await page.close();
+              resolve('С лекции ушло больше 25 человек.');
+            }
+          }
+
+          if (job.attrs.data.end.getTime() <= Date.now()) {
+            clearInterval(interval);
+            await page.close();
+            resolve('Время по расписанию подошло к концу.');
+          }
+        }, 5000);
+      } catch (err) {
         await page.close();
+        reject(err);
       }
-    }, 5000);
+    });
   }
 
   private async sayHi(page: Page): Promise<void> {
@@ -107,7 +121,7 @@ export class ScraperService {
     browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page: Page = await browser.newPage();
 
-    await page.goto(url, { waitUntil: 'networkidle2' });
+    await page.goto(url);
 
     // Ждем загрузки элемента h1
     await page.waitForSelector('h1', { timeout: 10000 });

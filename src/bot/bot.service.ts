@@ -5,6 +5,8 @@ import { AgendaService } from '../agenda/agenda.service';
 import * as moment from 'moment-timezone';
 import * as Joi from 'joi';
 import { ScraperService } from '../scrapper/scraper.service';
+import { ValidationResult } from './interfaces/validation-result.interface';
+import { getSamaraDateTimeNow } from '../utils';
 
 interface Lecture {
   date: string;
@@ -25,42 +27,49 @@ const TIME_SLOTS = [
 ];
 
 const CUSTOM_TIMES = [
-  '08:00',
-  '08:30',
-  '09:00',
-  '09:30',
-  '10:00',
-  '10:30',
-  '11:00',
-  '11:30',
-  '12:00',
-  '12:30',
-  '13:00',
-  '13:30',
-  '14:00',
-  '14:30',
-  '15:00',
-  '15:30',
-  '16:00',
-  '16:30',
-  '17:00',
+  // '08:00',
+  // '08:30',
+  // '09:00',
+  // '09:30',
+  // '10:00',
+  // '10:30',
+  // '11:00',
+  // '11:30',
+  // '12:00',
+  // '12:30',
+  // '13:00',
+  // '13:30',
+  // '14:00',
+  // '14:30',
+  // '15:00',
+  // '15:30',
+  // '16:00',
+  // '16:30',
+  // '17:00',
   '17:30',
   '18:00',
   '18:30',
   '19:00',
+  '19:30',
+  '20:00',
+  '20:30',
+  '21:00',
+  '21:30',
+  '22:00',
+  '22:30',
+  '23:30',
 ];
 
 @Injectable()
 @Update()
 export class BotService {
-  private userLectures = new Map<number, Lecture[]>();
   private state = new Map<number, any>();
   private mainMenu = Markup.keyboard([['/add'], ['/list'], ['/delete']])
     .oneTime()
     .resize();
 
   constructor(
-    @InjectBot() private readonly bot: Telegraf<Context>,
+    @InjectBot() private readonly bot: Telegraf<Context>, //проверить будет ли работать, если убрать
     private readonly agendaService: AgendaService,
     private readonly scraperService: ScraperService,
   ) {}
@@ -83,7 +92,7 @@ export class BotService {
     console.log({ username: ctx.from?.username });
     const userId = ctx.from?.id!;
     this.state.set(userId, { step: 'date' });
-    await ctx.reply('Введите дату лекции в формате ГГГГ-ММ-ДД');
+    await ctx.reply('Введите дату лекции в формате ММ-ДД');
   }
 
   @Command('list')
@@ -97,7 +106,8 @@ export class BotService {
 
     const messages = lectures.map(
       (lecture, i) =>
-        `${i + 1}. 📅 ${lecture.data.date} ${lecture.data.timeSlot}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`,
+        /* `${i + 1}. 📅 ${lecture.data.date} ${lecture.data.timeSlot}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`, */
+        `${i + 1}.\n📅 ${lecture.data.date}\n🕒 ${lecture.data.timeSlot}\n💻 ${lecture.data.roomName}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`,
     );
     await ctx.reply(messages.join('\n\n'), this.mainMenu);
   }
@@ -116,13 +126,14 @@ export class BotService {
         lectures
           .map(
             (lecture, i) =>
-              `${i + 1}. 📅 ${lecture.data.date} ${lecture.data.timeSlot}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`,
+              // `${i + 1}. 📅 ${lecture.data.date} ${lecture.data.timeSlot}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`,
+              `${i + 1}.\n📅 ${lecture.data.date}\n🕒 ${lecture.data.timeSlot}\n💻 ${lecture.data.roomName}\n🔗 ${lecture.data.link}\n👤 ${lecture.data.name}`,
           )
           .join('\n\n'),
       Markup.inlineKeyboard(buttons, { columns: 5 }),
     );
   }
-
+  // `📅 ${currentState.date}\n🕒 ${currentState.timeSlot}\n💻 ${currentState.roomName}\n🔗 ${currentState.link}\n👤 ${currentState.name}`,
   private async addLecture(userId: number, lecture: Lecture) {
     const startTimestamp = lecture.date + ' ' + lecture.timeSlot.split('-')[0];
     const endTimestamp = lecture.date + ' ' + lecture.timeSlot.split('-')[1];
@@ -139,6 +150,7 @@ export class BotService {
       userId: userId,
       name: lecture.name,
       roomName: lecture.roomName,
+      retriesCount: 0,
     });
   }
 
@@ -151,24 +163,19 @@ export class BotService {
 
     switch (currentState.step) {
       case 'date': {
-        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
         // @ts-ignore
-        if (!dateRegex.test(ctx.message.text)) {
-          await ctx.reply('Неверный формат даты. Пожалуйста, введите в формате ГГГГ-ММ-ДД');
-          return;
-        }
-        // @ts-ignore
-        const { error } = Joi.date().required().validate(ctx.message.text);
+        const { value, error } = this.getValidDate(ctx.message.text);
+
         if (error) {
-          await ctx.reply('Некорректная дата.');
+          await ctx.reply(error);
           return;
         }
         // @ts-ignore
-        currentState.date = ctx.message.text;
+        currentState.date = value;
         currentState.step = 'timeSlot';
         await ctx.reply(
           'Выберите временной слот:',
-          Markup.keyboard(TIME_SLOTS.map((t) => [t]))
+          Markup.keyboard(this.getTimeSlots(ctx.from?.id!).map((t) => [t]))
             .oneTime()
             .resize(),
         );
@@ -177,7 +184,7 @@ export class BotService {
       case 'timeSlot': {
         // @ts-ignore
         const slot = ctx.message.text;
-        if (!TIME_SLOTS.includes(slot)) {
+        if (!this.getTimeSlots(ctx.from?.id!).includes(slot)) {
           await ctx.reply('Пожалуйста, выберите слот из списка.');
           return;
         }
@@ -185,7 +192,7 @@ export class BotService {
           currentState.step = 'customStart';
           await ctx.reply(
             'Выберите время начала:',
-            Markup.keyboard(CUSTOM_TIMES.map((t) => [t]))
+            Markup.keyboard(this.getCustomStartTimes(ctx.from?.id!).map((t) => [t]))
               .oneTime()
               .resize(),
           );
@@ -199,25 +206,34 @@ export class BotService {
       }
       case 'customStart': {
         // @ts-ignore
-        if (!CUSTOM_TIMES.includes(ctx.message.text)) {
-          await ctx.reply('Выберите корректное время начала.');
-          return;
-        }
+        // if (!this.getCustomStartTimes(ctx.from?.id!).includes(ctx.message.text)) {
+        //   await ctx.reply('Выберите корректное время начала.');
+        //   return;
+        // }
         // @ts-ignore
         currentState.customStart = ctx.message.text;
         currentState.step = 'customEnd';
         await ctx.reply(
           'Теперь выберите время окончания:',
-          Markup.keyboard(CUSTOM_TIMES.map((t) => [t]))
+          Markup.keyboard(
+            CUSTOM_TIMES.filter((t) => this.compareTimes(t, currentState.customStart) > 0).map((t) => [t]),
+          )
             .oneTime()
             .resize(),
         );
         return;
       }
       case 'customEnd': {
+        // if (
+        //   // @ts-ignore
+        //   !CUSTOM_TIMES.filter((t) => this.compareTimes(t, currentState.customStart) > 0).includes(ctx.message.text)
+        // ) {
+        //   await ctx.reply('Выберите корректное время окончания.');
+        //   return;
+        // }
         // @ts-ignore
-        if (!CUSTOM_TIMES.includes(ctx.message.text)) {
-          await ctx.reply('Выберите корректное время окончания.');
+        if (this.compareTimes(ctx.message.text, currentState.customStart) > 1) {
+          await ctx.reply('Время окончания должно быть позже времени начала.');
           return;
         }
         // @ts-ignore
@@ -234,7 +250,7 @@ export class BotService {
         } catch (err) {
           console.error(err);
           await ctx.reply(
-            'Некорректная ссылка, проверьте на опечатки, ссылка должна быть такого вида https://bbb.ssau.ru/b/erw-iht-weq',
+            `Некорректная ссылка, проверьте на опечатки, ссылка должна быть такого вида https://bbb.ssau.ru/b/some-path`,
           );
           return;
         }
@@ -247,7 +263,7 @@ export class BotService {
         currentState.name = ctx.message.text;
         currentState.step = 'confirm';
         await ctx.reply(
-          `Подтвердите создание лекции:\n\n📅 Дата: ${currentState.date}\n🕒 Время: ${currentState.timeSlot}\n🔗 Ссылка: ${currentState.link}\n👤 Имя: ${currentState.name}`,
+          `Подтвердите создание лекции:\n\n📅 Дата: ${currentState.date}\n🕒 Время: ${currentState.timeSlot}\n💻Название комнаты: ${currentState.roomName}\n🔗 Ссылка: ${currentState.link}\n👤 Имя: ${currentState.name}`,
           Markup.inlineKeyboard([
             Markup.button.callback('✅ Подтвердить', 'confirm_add'),
             Markup.button.callback('❌ Отменить', 'cancel_add'),
@@ -286,5 +302,81 @@ export class BotService {
         await ctx.reply('🗑 Посещение лекции отменено', this.mainMenu);
       }
     }
+  }
+
+  private compareTimes(time1: string, time2: string): number {
+    // Split into hours and minutes
+    const [hours1, minutes1] = time1.split(':').map(Number);
+    const [hours2, minutes2] = time2.split(':').map(Number);
+
+    // Compare hours first
+    if (hours1 < hours2) return -1;
+    if (hours1 > hours2) return 1;
+
+    // If hours are equal, compare minutes
+    if (minutes1 < minutes2) return -1;
+    if (minutes1 > minutes2) return 1;
+
+    // If both hours and minutes are equal
+    return 0;
+  }
+
+  private getValidDate(date: string): ValidationResult {
+    let completeDate: string | undefined;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(date)) {
+      const [year, month, day] = date.split('-');
+      completeDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    } else if (/^\d{2}-\d{1,2}-\d{1,2}$/.test(date)) {
+      const [year, month, day] = date.split('-');
+      completeDate = `20${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    } else if (/^\d{1,2}-\d{1,2}$/.test(date)) {
+      const [month, day] = date.split('-');
+      completeDate = `${today.getFullYear()}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    } else if (/^\d{1,2}$/.test(date)) {
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      completeDate = `${today.getFullYear()}-${month}-${date.padStart(2, '0')}`;
+    } else {
+      return { value: null, error: 'Неверный формат даты.\nПриемлемые форматы:\n ДД\nММ-ДД\nГГ-ММ-ДД\nГГГГ-ММ-ДД' };
+    }
+
+    const { error } = Joi.date().required().min(today).validate(completeDate);
+
+    if (error) {
+      return { value: null, error: 'Дата должна быть не позже сегодня' };
+    }
+
+    return { value: completeDate, error: null };
+  }
+
+  private getCustomStartTimes(userId: number) {
+    const [day, time] = getSamaraDateTimeNow();
+
+    if (this.state.get(userId).date === day)
+      return CUSTOM_TIMES.slice(0, CUSTOM_TIMES.length - 1).filter((t) => this.compareTimes(t, time) > 0);
+
+    return CUSTOM_TIMES.slice(0, CUSTOM_TIMES.length - 1);
+  }
+
+  private compareTimeAndTimeslot(timeslot: string, time: string): number {
+    const slotEnd = timeslot.split('-')[1];
+
+    return this.compareTimes(slotEnd, time);
+  }
+
+  private getTimeSlots(userId: number) {
+    const [day, time] = getSamaraDateTimeNow();
+
+    if (this.state.get(userId).date === day)
+      return TIME_SLOTS.filter((t) => {
+        if (t === 'Кастомное время') {
+          return true;
+        }
+        return this.compareTimeAndTimeslot(t, time) > 0;
+      });
+
+    return TIME_SLOTS;
   }
 }

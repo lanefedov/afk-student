@@ -7,6 +7,7 @@ import { TelegrafModule } from 'nestjs-telegraf';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AgendaModule } from './agenda/agenda.module';
 import { HealthCheckModule } from './health-check/health-check.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { HealthCheckModule } from './health-check/health-check.module';
     BotModule,
     AgendaModule,
     HealthCheckModule,
+    NotificationModule,
   ],
   controllers: [],
   providers: [],
